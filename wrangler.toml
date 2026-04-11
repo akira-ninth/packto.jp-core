@@ -1,0 +1,35 @@
+name = "imagy"
+main = "src/index.js"
+compatibility_date = "2026-04-07"
+
+# workers.dev URL を残す (検証用、本番は packto.jp の routes 経由)
+workers_dev = true
+
+# jSquash の WebAssembly モジュールを Wrangler にバンドルさせる
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+# Phase 6: packto.jp zone Active 後、ワイルドカード *.packto.jp/* を imagy worker にバインド。
+# 顧客は <customer>.packto.jp/<path> でアクセス、resolveCustomer がサブドメインから
+# CUSTOMER_ORIGINS で実 origin を解決する。
+[[routes]]
+pattern = "*.packto.jp/*"
+zone_name = "packto.jp"
+
+# Phase 11: Customer 解決を packto-console (Laravel) → KV → worker の流れに変える。
+# packto-console の AdminCustomerController が CRUD のたびに Cloudflare KV API を叩いて
+# このネームスペースに { origin, plan } を書き込む。worker は env.CUSTOMERS.get() で読む。
+# CUSTOMER_ORIGINS の hardcode は KV ミス時のフォールバックとして残置。
+[[kv_namespaces]]
+binding = "CUSTOMERS"
+id = "4a297f21303a49359db945b69be75b95"
+
+# Phase 12a: Analytics Engine データセット (1 リクエスト 1 データポイント)
+# index = customer サブドメイン、blobs = [kind, format, status, cacheStatus]、
+# doubles = [outputBytes]。Laravel 側 (packto-console) が SQL API でクエリして
+# tenant ダッシュボードに表示する。
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "imagy_requests"
