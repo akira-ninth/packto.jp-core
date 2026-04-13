@@ -5,16 +5,15 @@
  *
  * 仕組み:
  * 1. edgeCache (caches.default) から URL ベースで cached を探す
- * 2. cached があれば ETag を取り出し、origin への fetch に
- *    `If-None-Match: <etag>` を付ける
+ * 2. cached があれば ETag → `If-None-Match`、
+ *    ETag が無ければ Last-Modified → `If-Modified-Since` を付ける
  * 3. origin が 304 を返したら → `kind: 'cached'` で cached を返す
  *    (decode/encode/minify は不要、worker CPU を節約)
  * 4. origin が 200 (or 4xx/5xx) を返したら → `kind: 'fresh'` で
  *    upstream を返す。呼び出し側で通常の処理を続ける
- * 5. ETag が無い origin: 検証スキップ → 通常の cache 動作 (TTL ベース)
  *
  * これにより origin が更新された場合、最大 TTL ぶん待たず次のリクエストで
- * 反映される (HEAD round-trip 1 回ぶんのコストで反映)。
+ * 反映される (round-trip 1 回ぶんのコストで反映)。
  */
 
 /**
@@ -56,11 +55,14 @@ export async function fetchUpstreamWithCacheValidation({
   }
 
   const cachedEtag = cached?.headers.get('etag');
+  const cachedLastModified = cached?.headers.get('last-modified');
 
-  // ETag があれば If-None-Match を付ける
+  // ETag or Last-Modified で条件付きリクエストを構成
   const headers = { ...fetchHeaders };
   if (cachedEtag) {
     headers['If-None-Match'] = cachedEtag;
+  } else if (cachedLastModified) {
+    headers['If-Modified-Since'] = cachedLastModified;
   }
 
   const upstream = await fetch(originUrl, {
@@ -74,7 +76,7 @@ export async function fetchUpstreamWithCacheValidation({
     return {
       kind: 'cached',
       cached,
-      historyTag: '[hit-validated]',
+      historyTag: cachedEtag ? '[hit-validated]' : '[hit-lm]',
     };
   }
 
