@@ -843,11 +843,9 @@ export default {
       // Cache API は GET 応答のみ保存できるので、HEAD のときは put しない
       // (HEAD 応答を put しようとすると "Cannot cache response to non-GET request" エラー)
       if (cacheable && edgeCache && resp.status === 200 && request.method === 'GET') {
-        const putPromise = edgeCache.put(request, resp.clone()).catch(() => { /* swallow */ });
         if (ctx && typeof ctx.waitUntil === 'function') {
-          ctx.waitUntil(putPromise);
-
           if (wantsAvif && result.kind === 'encoded' && result.format === 'webp' && result._rgbaCopy) {
+            // WebP はキャッシュせず即返却。バックグラウンドで AVIF を生成してキャッシュ
             const avifTask = (async () => {
               await ensureWasm();
               const avifBuf = await encodeImage(
@@ -860,8 +858,14 @@ export default {
                 { 'x-imagy-converted': 'avif', 'x-imagy-output-size': `${result.width}x${result.height}`, ...validationHeaders },
               );
               await edgeCache.put(request, avifResp);
-            })().catch(() => { /* AVIF は best-effort */ });
+            })().catch(() => {
+              // AVIF 失敗時は WebP をキャッシュ (フォールバック)
+              edgeCache.put(request, resp.clone()).catch(() => {});
+            });
             ctx.waitUntil(avifTask);
+          } else {
+            const putPromise = edgeCache.put(request, resp.clone()).catch(() => { /* swallow */ });
+            ctx.waitUntil(putPromise);
           }
         }
       }
