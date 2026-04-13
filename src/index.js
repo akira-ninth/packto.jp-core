@@ -134,8 +134,10 @@ function buildForbidden(processHistory) {
  * 成功レスポンス組み立て。
  */
 function buildSuccess(body, contentType, originUrl, cache, processHistory, extra = {}) {
+  const bodyBytes = body instanceof ArrayBuffer ? body.byteLength : (body?.byteLength ?? 0);
   const headers = new Headers({
     'content-type': contentType,
+    'content-length': String(bodyBytes),
     'cache-control': cache.value,
     'access-control-allow-origin': '*',
     'link': `<${originUrl}>; rel="canonical"`,
@@ -743,13 +745,24 @@ export default {
       // 必ず content-length を返す前提。無いときは 0 のまま)
       const upstreamLen = parseInt(upstream.headers.get('content-length') || '0', 10);
       if (upstreamLen) analytics.inputBytes = upstreamLen;
+      // キャッシュミス時は AVIF より高速な WebP を優先返却し、
+      // バックグラウンドで AVIF をエンコードしてキャッシュに格納する
+      const isCacheMiss = !validated.historyTag.includes('cache-stale');
+      const clientAccept = request.headers.get('Accept') || '';
+      const wantsAvif = requestKind === 'image' && isCacheMiss
+        && clientAccept.includes('image/avif') && clientAccept.includes('image/webp');
+      const effectiveAccept = wantsAvif
+        ? clientAccept.replace('image/avif', '')
+        : clientAccept;
+
       const result = await withTimeout(
         requestKind === 'image'
-          ? convertImage(upstream, params, request.headers.get('Accept'))
+          ? convertImage(upstream, params, effectiveAccept)
           : convertText(upstream, params, requestUrl),
         TOTAL_TIMEOUT_MS,
         'total',
       );
+      if (wantsAvif) result.history += '[avif-deferred]';
       clearTimeout(fetchTimer);
 
       history += result.history;
