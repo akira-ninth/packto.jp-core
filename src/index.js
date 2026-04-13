@@ -588,6 +588,7 @@ async function convertImage(upstream, params, acceptHeader) {
     format: outputFormat,
     width: imageData.width,
     height: imageData.height,
+    _rgbaCopy: imageData.data.slice(),
     history,
   };
 }
@@ -845,6 +846,23 @@ export default {
         const putPromise = edgeCache.put(request, resp.clone()).catch(() => { /* swallow */ });
         if (ctx && typeof ctx.waitUntil === 'function') {
           ctx.waitUntil(putPromise);
+
+          if (wantsAvif && result.kind === 'encoded' && result.format === 'webp' && result._rgbaCopy) {
+            const avifTask = (async () => {
+              await ensureWasm();
+              const avifBuf = await encodeImage(
+                { data: result._rgbaCopy, width: result.width, height: result.height },
+                'avif', params,
+              );
+              const avifResp = buildSuccess(
+                avifBuf, 'image/avif', originUrl, cache,
+                history.replace('[webp]', '[avif]').replace('[avif-deferred]', '[avif-bg]'),
+                { 'x-imagy-converted': 'avif', 'x-imagy-output-size': `${result.width}x${result.height}`, ...validationHeaders },
+              );
+              await edgeCache.put(request, avifResp);
+            })().catch(() => { /* AVIF は best-effort */ });
+            ctx.waitUntil(avifTask);
+          }
         }
       }
       return resp;
