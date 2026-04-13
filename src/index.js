@@ -137,6 +137,7 @@ function buildSuccess(body, contentType, originUrl, cache, processHistory, extra
   const headers = new Headers({
     'content-type': contentType,
     'cache-control': cache.value,
+    'access-control-allow-origin': '*',
     'link': `<${originUrl}>; rel="canonical"`,
     'vary': 'Accept',
     'x-imagy-version': WORKER_VERSION,
